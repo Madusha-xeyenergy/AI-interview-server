@@ -63,6 +63,12 @@ const saveTranscriptSchema = z.object({
           (entry.role === "assistant" || entry.role === "user") && entry.text.length > 0
       )
     ),
+  // Missing when the agent couldn't start a recording. A malformed one is dropped, not rejected:
+  // losing the recording link is better than losing the transcript.
+  recording: z
+    .object({ egressId: z.string().min(1).max(100), file: z.string().min(1).max(500) })
+    .optional()
+    .catch(undefined),
 });
 
 export type GenerateQuestionsInput = z.infer<typeof generateQuestionsSchema>;
