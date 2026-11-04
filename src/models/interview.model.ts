@@ -59,6 +59,17 @@ const transcriptEntrySchema = new Schema(
   { _id: false }
 );
 
+// One per agent job: the MP4 LiveKit Egress made of the room (camera, screen share and both voices),
+// for the hiring team to check the candidate didn't cheat. `file` is the path Egress wrote it to.
+const recordingSchema = new Schema(
+  {
+    egressId: { type: String, required: true },
+    file: { type: String, required: true },
+    at: { type: Date, required: true },
+  },
+  { _id: false }
+);
+
 // Written after the transcript arrives. score, recommendation and competencies are computed in code
 // from questionScores; summary, strengths and concerns are written by the LLM.
 const evaluationSchema = new Schema(
@@ -109,6 +120,7 @@ const interviewSchema = new Schema(
 
     // Results
     transcript: { type: [transcriptEntrySchema], default: [] },
+    recordings: { type: [recordingSchema], default: [] }, // more than one if the candidate rejoined
     evaluation: { type: evaluationSchema },
   },
   { timestamps: true }
