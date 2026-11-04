@@ -85,6 +85,7 @@ const saveTranscriptService = async (interviewId: string, input: SaveTranscriptI
 
   // Append, don't replace: if the candidate drops and rejoins, a new agent job sends the next part.
   interview.transcript.push(...input.transcript);
+  if (input.recording) interview.recordings.push({ ...input.recording, at: new Date() });
   interview.endReason = input.endReason;
 
   // "candidate_left" keeps the interview in_progress, so the invite link still allows a rejoin.
