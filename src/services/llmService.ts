@@ -12,8 +12,10 @@ import {
 import { QUESTION_TYPES, type QuestionType } from "../models/interview.model.js";
 import { HttpError } from "../utils/http-error.js";
 
-// The only file that talks to the LLM provider. Switching providers means changing this file only.
-// Groq's API is OpenAI-compatible, so a plain fetch is enough (no SDK needed).
+// The only file that talks to the LLM providers. Switching providers means changing this file only.
+// Questions come from OpenAI, evaluation from Groq. Groq's API is OpenAI-compatible, so both use
+// the same request shape and a plain fetch is enough (no SDK needed).
+const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
 const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 // CVs are usually 1–3k words; the cap keeps a huge PDF from blowing up the prompt.
@@ -30,8 +32,10 @@ type GenerateQuestionsInput = {
 
 // Checks the model's reply at runtime too: the JSON schema guides the model, zod enforces it.
 const questionsResponseSchema = z.object({
-  questions: z
-    .array(
+  // The model sometimes pads the array with stray "" entries between questions; drop non-objects first.
+  questions: z.preprocess(
+    (value) => (Array.isArray(value) ? value.filter((item) => typeof item === "object" && item !== null) : value),
+    z.array(
       z.object({
         text: z.string().trim().min(5),
         topic: z.string().trim().default(""),
@@ -41,8 +45,8 @@ const questionsResponseSchema = z.object({
           redFlags: z.array(z.string().trim().min(1)).default([]),
         }),
       })
-    )
-    .min(1),
+    ).min(1)
+  ),
 });
 
 const FOCUS_GUIDE = {
@@ -110,21 +114,23 @@ const generateQuestions = async (input: GenerateQuestionsInput) => {
   let raw: string | undefined;
 
   try {
-    const response = await fetch(GROQ_CHAT_URL, {
+    const response = await fetch(OPENAI_CHAT_URL, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${env.GROQ_API_KEY}`,
+        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: env.GROQ_MODEL,
+        model: env.OPENAI_MODEL,
         messages: [{ role: "user", content: buildQuestionsPrompt(input) }],
         temperature: 0.7,
         // Structured output: the model must return JSON in exactly this shape.
+        // strict: OpenAI then guarantees the reply matches the schema.
         response_format: {
           type: "json_schema",
           json_schema: {
             name: "interview_questions",
+            strict: true,
             schema: {
               type: "object",
               properties: {
@@ -160,12 +166,12 @@ const generateQuestions = async (input: GenerateQuestionsInput) => {
     });
 
     if (!response.ok) {
-      throw new Error(`Groq ${response.status}: ${await response.text()}`);
+      throw new Error(`OpenAI ${response.status}: ${await response.text()}`);
     }
     const data = (await response.json()) as { choices: { message: { content: string } }[] };
     raw = data.choices[0]?.message.content;
   } catch (err) {
-    console.error("Groq request failed:", err);
+    console.error("OpenAI request failed:", err);
     throw new HttpError(502, "Couldn't generate interview questions. Please try again.");
   }
 
@@ -178,13 +184,13 @@ const generateQuestions = async (input: GenerateQuestionsInput) => {
 
   const parsed = questionsResponseSchema.safeParse(json);
   if (!parsed.success) {
-    console.error("Unexpected Groq response:", raw);
+    console.error("Unexpected OpenAI response:", raw);
     throw new HttpError(502, "The AI returned questions in an unexpected format. Please try again.");
   }
 
   return {
     questions: parsed.data.questions.slice(0, input.questionCount),
-    model: env.GROQ_MODEL,
+    model: env.OPENAI_MODEL,
   };
 };
 
